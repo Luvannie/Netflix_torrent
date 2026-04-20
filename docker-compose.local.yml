@@ -1,0 +1,109 @@
+name: netflix-torrent-local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: netflixtorrent-local-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-netflixtorrent}
+      POSTGRES_USER: ${POSTGRES_USER:-netflixtorrent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_postgres_password}
+    ports:
+      - "15432:5432"
+    volumes:
+      - local-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-netflixtorrent} -d ${POSTGRES_DB:-netflixtorrent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: ../Dockerfile.local-backend
+    container_name: netflixtorrent-local-backend
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: worker,desktop
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: 18080
+      APP_BIND_LOCALHOST_ONLY: "false"
+      APP_LOCAL_TOKEN_ENABLED: ${APP_LOCAL_TOKEN_ENABLED:-true}
+      APP_LOCAL_TOKEN: ${APP_LOCAL_TOKEN:-replace-with-random-local-token}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-netflixtorrent}
+      DB_USERNAME: ${POSTGRES_USER:-netflixtorrent}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-local_postgres_password}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      TMDB_READ_ACCESS_TOKEN: ${TMDB_READ_ACCESS_TOKEN:-}
+      TORRENT_SEARCH_PROVIDER: ${TORRENT_SEARCH_PROVIDER:-prowlarr}
+      TORRENT_SEARCH_MAX_RESULTS: ${TORRENT_SEARCH_MAX_RESULTS:-50}
+      JACKETT_URL: http://jackett:9117
+      JACKETT_API_KEY: ${JACKETT_API_KEY:-}
+      JACKETT_INDEXERS: ${JACKETT_INDEXERS:-all}
+      PROWLARR_URL: http://prowlarr:9696
+      PROWLARR_API_KEY: ${PROWLARR_API_KEY:-}
+      QBITTORRENT_URL: http://qbittorrent:8082
+      QBITTORRENT_USERNAME: ${QBITTORRENT_USERNAME:-admin}
+      QBITTORRENT_PASSWORD: ${QBITTORRENT_PASSWORD:-}
+      DOWNLOAD_DEFAULT_SAVE_PATH: /data/media
+      FFPROBE_PATH: ffprobe
+    ports:
+      - "18080:18080"
+    volumes:
+      - local-media-data:/data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: netflixtorrent-local-qbittorrent
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      WEBUI_PORT: 8082
+    ports:
+      - "18082:8082"
+    volumes:
+      - local-qbittorrent-config:/config
+      - local-media-data:/data/media
+      - local-incomplete-data:/data/incomplete
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: netflixtorrent-local-prowlarr
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    ports:
+      - "19696:9696"
+    volumes:
+      - local-prowlarr-config:/config
+
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: netflixtorrent-local-jackett
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    ports:
+      - "19117:9117"
+    volumes:
+      - local-jackett-config:/config
+      - local-incomplete-data:/downloads
+
+volumes:
+  local-postgres-data:
+  local-media-data:
+  local-incomplete-data:
+  local-qbittorrent-config:
+  local-prowlarr-config:
+  local-jackett-config:

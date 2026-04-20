@@ -1,0 +1,18 @@
+# Build output
+**/target/
+
+# IDE metadata
+Backend/.classpath
+Backend/.project
+Backend/.settings/
+
+# Logs and local runtime output
+*.log
+*.err
+logs/
+.tmp/
+
+# Local secrets
+.env
+*.env
+Backend/application-local.yml
