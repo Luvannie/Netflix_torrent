@@ -146,6 +146,31 @@ func TestLocalTokenMiddlewareDisabledAllowsWriteWithoutToken(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareReturns204WithCORSHeadersOnOptions(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	handler := CORSMiddleware([]string{"http://localhost:5173"})(next)
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/catalog", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Errorf("Access-Control-Allow-Origin = %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); got == "" {
+		t.Error("Access-Control-Allow-Methods is empty")
+	}
+}
+
 func TestRequestIDMiddlewareKeepsInboundHeaderForResponseMeta(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := EffectiveRequestID(r); got != "req-1" {

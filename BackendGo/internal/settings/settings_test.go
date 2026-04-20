@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -58,9 +59,10 @@ func TestPathResolverValidatesWithinAllowedBases(t *testing.T) {
 }
 
 func TestPathResolverIsWritable(t *testing.T) {
-	resolver := NewPathResolver([]string{"/tmp"})
+	base := t.TempDir()
+	resolver := NewPathResolver([]string{base})
 
-	err := resolver.IsWritable("/tmp/test-path-resolver")
+	err := resolver.IsWritable(filepath.Join(base, "test-path-resolver"))
 	if err != nil {
 		t.Fatalf("IsWritable error = %v", err)
 	}
@@ -105,7 +107,7 @@ type mockRepo struct {
 }
 
 func (m *mockRepo) List() []StorageProfile { return m.profiles }
-func (m *mockRepo) Err() error           { return m.err }
+func (m *mockRepo) Err() error             { return m.err }
 
 type repoInterface interface {
 	List(ctx interface{}) ([]StorageProfile, error)

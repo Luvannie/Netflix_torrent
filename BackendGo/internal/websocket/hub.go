@@ -1,11 +1,10 @@
 package websocket
 
 import (
-	"encoding/json"
 	"net"
+	"sort"
 	"strings"
 	"sync"
-	"time"
 )
 
 type Message struct {
@@ -28,60 +27,54 @@ type Frame struct {
 }
 
 type Hub struct {
-	clients    map[Client]bool
-	broadcast  chan []byte
-	register   chan Client
-	unregister chan Client
-	mu         sync.RWMutex
-	stop       chan struct{}
+	clients map[Client]bool
+	mu      sync.RWMutex
+	stop    chan struct{}
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[Client]bool),
-		broadcast:  make(chan []byte, 10),
-		register:   make(chan Client),
-		unregister: make(chan Client),
-		stop:       make(chan struct{}),
+		clients: make(map[Client]bool),
+		stop:    make(chan struct{}),
 	}
 }
 
 func (h *Hub) Run() {
-	for {
-		select {
-		case client := <-h.register:
-			h.mu.Lock()
-			h.clients[client] = true
-			h.mu.Unlock()
-		case client := <-h.unregister:
-			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				client.Close()
-			}
-			h.mu.Unlock()
-		case message := <-h.broadcast:
-			h.mu.RLock()
-			for client := range h.clients {
-				go client.Send(message)
-			}
-			h.mu.RUnlock()
-		case <-h.stop:
-			return
-		}
-	}
+	<-h.stop
 }
 
 func (h *Hub) Register(client Client) {
-	h.register <- client
+	h.mu.Lock()
+	h.clients[client] = true
+	h.mu.Unlock()
 }
 
 func (h *Hub) Unregister(client Client) {
-	h.unregister <- client
+	h.mu.Lock()
+	_, ok := h.clients[client]
+	if ok {
+		delete(h.clients, client)
+	}
+	h.mu.Unlock()
+
+	if ok {
+		_ = client.Close()
+	}
 }
 
 func (h *Hub) Broadcast(message []byte) {
-	h.broadcast <- message
+	h.mu.RLock()
+	clients := make([]Client, 0, len(h.clients))
+	for client := range h.clients {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+
+	for _, client := range clients {
+		go func(c Client) {
+			_ = c.Send(message)
+		}(client)
+	}
 }
 
 func (h *Hub) Stop() {
@@ -137,10 +130,16 @@ func FormatFrame(command string, headers map[string]string, body string) string 
 	sb.WriteString(command)
 	sb.WriteString("\n")
 
-	for k, v := range headers {
+	keys := make([]string, 0, len(headers))
+	for k := range headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
 		sb.WriteString(k)
 		sb.WriteString(":")
-		sb.WriteString(v)
+		sb.WriteString(headers[k])
 		sb.WriteString("\n")
 	}
 
@@ -159,7 +158,7 @@ func SendMESSAGE(ws Client, subscription, destination, body string) error {
 	frame := FormatFrame("MESSAGE", map[string]string{
 		"subscription": subscription,
 		"destination":  destination,
-		"content-type":  "application/json",
+		"content-type": "application/json",
 	}, body)
 	return ws.Send([]byte(frame))
 }
@@ -177,6 +176,3 @@ func SendERROR(ws Client, message string) error {
 	}, "")
 	return ws.Send([]byte(frame))
 }
-
-var _ = time.Now
-var _ = json.Marshal
