@@ -32,3 +32,10 @@ STARTUP.md
 TORRENT_SEARCH_WORKFLOW.md
 DOWNLOAD_WORKER_WORKFLOW.md
 prepare.md
+
+# Go backend migration artifacts
+BackendGo/backend-go.exe
+BackendGo/backend-go
+BackendGo/*.test
+BackendGo/coverage.out
+BackendGo/tmp/
