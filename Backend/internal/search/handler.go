@@ -46,7 +46,7 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteOK(w, http.StatusCreated, id, httpx.InboundRequestID(r))
+	api.WriteOK(w, http.StatusOK, id, httpx.InboundRequestID(r))
 }
 
 func (h *Handler) listJobs(w http.ResponseWriter, r *http.Request) {

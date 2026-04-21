@@ -1,10 +1,11 @@
 package httpx
 
 import (
-	"encoding/json"
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/netflixtorrent/backend-go/internal/api"
 )
 
 const LocalTokenHeader = "X-App-Local-Token"
@@ -16,7 +17,7 @@ func LocalOnlyMiddleware(enabled bool) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			writeRawError(w, http.StatusForbidden, "Access denied. This endpoint is only accessible from localhost.")
+			writeRawError(w, http.StatusForbidden, "", "ACCESS_DENIED", "Access denied. This endpoint is only accessible from localhost.")
 		})
 	}
 }
@@ -30,18 +31,18 @@ func LocalTokenMiddleware(enabled bool, expectedToken string) func(http.Handler)
 			}
 
 			if strings.TrimSpace(expectedToken) == "" {
-				writeRawError(w, http.StatusServiceUnavailable, "Local token is enabled but not configured.")
+				writeRawError(w, http.StatusServiceUnavailable, "", "TOKEN_NOT_CONFIGURED", "Local token is enabled but not configured.")
 				return
 			}
 
 			token := strings.TrimSpace(r.Header.Get(LocalTokenHeader))
 			if token == "" {
-				writeRawError(w, http.StatusForbidden, "Local token required for this endpoint.")
+				writeRawError(w, http.StatusForbidden, "", "TOKEN_MISSING", "Local token required for this endpoint.")
 				return
 			}
 
 			if token != expectedToken {
-				writeRawError(w, http.StatusForbidden, "Invalid local token.")
+				writeRawError(w, http.StatusForbidden, "", "TOKEN_INVALID", "Invalid local token.")
 				return
 			}
 
@@ -78,8 +79,6 @@ func isProtectedPath(path string) bool {
 		strings.HasPrefix(path, "/api/v1/library/scan")
 }
 
-func writeRawError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+func writeRawError(w http.ResponseWriter, status int, requestID, code, message string) {
+	api.WriteError(w, status, code, message, nil, requestID)
 }
