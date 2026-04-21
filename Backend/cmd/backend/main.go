@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,9 +17,12 @@ import (
 	"github.com/netflixtorrent/backend-go/internal/events"
 	"github.com/netflixtorrent/backend-go/internal/health"
 	"github.com/netflixtorrent/backend-go/internal/httpx"
+	"github.com/netflixtorrent/backend-go/internal/library"
 	"github.com/netflixtorrent/backend-go/internal/search"
 	"github.com/netflixtorrent/backend-go/internal/settings"
+	"github.com/netflixtorrent/backend-go/internal/streaming"
 	"github.com/netflixtorrent/backend-go/internal/system"
+	"github.com/netflixtorrent/backend-go/internal/websocket"
 )
 
 func main() {
@@ -52,6 +54,9 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("migrations applied")
+
+	hub := websocket.NewHub()
+	eventBus := events.NewBus()
 
 	mux := app.NewServeMux()
 
@@ -113,6 +118,20 @@ func main() {
 	systemHandler := system.Handler(systemService)
 	mux.Handle("GET /api/v1/system/status", systemHandler)
 
+	libraryRepo := library.NewRepository(pool)
+	libraryHandler := library.NewHandler(libraryRepo)
+	for pattern, handler := range libraryHandler.Routes() {
+		mux.Handle(pattern, handler)
+	}
+
+	streamingService := streaming.NewService(libraryRepo, cfg.FFprobe.Path, cfg.Download.DefaultSavePath)
+	streamingHandler := streaming.NewHandler(streamingService)
+	for pattern, handler := range streamingHandler.Routes() {
+		mux.Handle(pattern, handler)
+	}
+
+	mux.Handle("GET /ws", websocket.ServeWS(hub, eventBus))
+
 	var finalHandler http.Handler = mux
 
 	if cfg.Auth.LocalTokenEnabled {
@@ -154,6 +173,3 @@ func main() {
 
 	logger.Info("server stopped")
 }
-
-var _ = events.NewBus
-var _ = fmt.Sprintf

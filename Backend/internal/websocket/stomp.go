@@ -1,108 +1,111 @@
 package websocket
 
 import (
-	"bufio"
 	"encoding/json"
 	"net"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/netflixtorrent/backend-go/internal/events"
 )
 
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+	Subprotocols: []string{"v10.stomp", "v11.stomp", "v12.stomp"},
+}
+
 type WebSocketConn struct {
-	conn   net.Conn
-	reader *bufio.Reader
-	Frames chan Frame
+	conn *websocket.Conn
 }
 
-func HijackAndUpgrade(w http.ResponseWriter, r *http.Request) *WebSocketConn {
-	h, ok := w.(http.Hijacker)
-	if !ok {
-		return nil
-	}
-	conn, _, err := h.Hijack()
-	if err != nil {
-		return nil
-	}
-
-	conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"))
-
-	return &WebSocketConn{
-		conn:   conn,
-		reader: bufio.NewReader(conn),
-		Frames: make(chan Frame, 10),
-	}
+func (ws *WebSocketConn) RemoteAddr() net.Addr {
+	return ws.conn.RemoteAddr()
 }
 
-func (ws *WebSocketConn) ReadMessage() (int, []byte, error) {
-	data, err := ws.reader.ReadBytes(0x00)
-	if err != nil {
-		return 0, nil, err
-	}
-	data = data[:len(data)-1]
-	return 1, data, nil
-}
-
-func (ws *WebSocketConn) WriteMessage(msgType int, data []byte) error {
-	if msgType == 1 {
-		frame := append([]byte{0x81}, data...)
-		frame = append(frame, 0x00)
-		_, err := ws.conn.Write(frame)
-		return err
-	}
-	return nil
+func (ws *WebSocketConn) Send(msg []byte) error {
+	return ws.conn.WriteMessage(websocket.TextMessage, msg)
 }
 
 func (ws *WebSocketConn) Close() error {
 	return ws.conn.Close()
 }
 
-func (ws *WebSocketConn) WriteFrame(data string) {
-	if ws.conn != nil {
-		ws.conn.Write([]byte(data))
-	} else {
-		ws.Frames <- ParseFrame(data)
+func (ws *WebSocketConn) ReadFrame() (Frame, error) {
+	_, reader, err := ws.conn.NextReader()
+	if err != nil {
+		return Frame{}, err
 	}
+	data := make([]byte, 0, 4096)
+	buf := make([]byte, 1024)
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			data = append(data, buf[:n]...)
+			if len(data) > 0 && data[len(data)-1] == 0x00 {
+				data = data[:len(data)-1]
+				break
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return ParseFrame(string(data)), nil
 }
 
-func (ws *WebSocketConn) ReadFrame() (Frame, error) {
-	if ws.conn != nil {
-		data, _ := ws.reader.ReadBytes(0x00)
-		data = data[:len(data)-1]
-		return ParseFrame(string(data)), nil
+func (ws *WebSocketConn) WriteFrame(data string) {
+	ws.conn.WriteMessage(websocket.TextMessage, []byte(data))
+}
+
+func ServeWS(hub *Hub, eventBus *events.Bus) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+
+		wsConn := &WebSocketConn{conn: conn}
+		hub.Register(wsConn)
+		defer hub.Unregister(wsConn)
+
+		stompHandler := NewSTOMPHandler(hub, eventBus)
+
+		for {
+			frame, err := wsConn.ReadFrame()
+			if err != nil {
+				break
+			}
+
+			if err := stompHandler.Handle(wsConn, frame); err != nil {
+				break
+			}
+		}
 	}
-	return <-ws.Frames, nil
 }
 
 type STOMPHandler struct {
 	hub      *Hub
-	events   EventBus
+	events   *events.Bus
 	sessions map[string]*Subscription
 	mu       sync.RWMutex
-}
-
-type EventBus interface {
-	Publish(destination string, payload any) error
-	Subscribe(destination string) (<-chan EventMessage, func())
-}
-
-type EventMessage struct {
-	Destination string
-	Body        []byte
 }
 
 type Subscription struct {
 	ID          string
 	Destination string
-	ch          <-chan EventMessage
+	ch          <-chan events.Message
 	cancel      func()
 }
 
-func NewSTOMPHandler(hub *Hub, events EventBus) *STOMPHandler {
+func NewSTOMPHandler(hub *Hub, bus *events.Bus) *STOMPHandler {
 	return &STOMPHandler{
 		hub:      hub,
-		events:   events,
+		events:   bus,
 		sessions: make(map[string]*Subscription),
 	}
 }
@@ -110,6 +113,10 @@ func NewSTOMPHandler(hub *Hub, events EventBus) *STOMPHandler {
 func (h *STOMPHandler) Handle(ws *WebSocketConn, frame Frame) error {
 	switch frame.Command {
 	case "CONNECT":
+		ws.WriteFrame(FormatFrame("CONNECTED", map[string]string{
+			"version":   "1.2",
+			"user-name": "local-user",
+		}, ""))
 		return nil
 	case "SUBSCRIBE":
 		return h.handleSUBSCRIBE(ws, frame)
@@ -118,7 +125,9 @@ func (h *STOMPHandler) Handle(ws *WebSocketConn, frame Frame) error {
 	case "DISCONNECT":
 		return h.handleDISCONNECT(ws, frame)
 	default:
-		ws.WriteFrame("ERROR\nmessage:Unknown command\n\n\x00")
+		ws.WriteFrame(FormatFrame("ERROR", map[string]string{
+			"message": "Unknown command",
+		}, ""))
 	}
 	return nil
 }
@@ -128,7 +137,9 @@ func (h *STOMPHandler) handleSUBSCRIBE(ws *WebSocketConn, frame Frame) error {
 	dest := frame.Headers["destination"]
 
 	if id == "" || dest == "" {
-		ws.WriteFrame("ERROR\nmessage:Missing id or destination\n\n\x00")
+		ws.WriteFrame(FormatFrame("ERROR", map[string]string{
+			"message": "Missing id or destination",
+		}, ""))
 		return nil
 	}
 
@@ -146,7 +157,11 @@ func (h *STOMPHandler) handleSUBSCRIBE(ws *WebSocketConn, frame Frame) error {
 	go func() {
 		for msg := range ch {
 			body := string(msg.Body)
-			ws.WriteFrame("MESSAGE\nsubscription:" + id + "\ndestination:" + dest + "\ncontent-type:application/json\n\n" + body + "\x00")
+			ws.WriteFrame(FormatFrame("MESSAGE", map[string]string{
+				"subscription": id,
+				"destination":  dest,
+				"content-type": "application/json",
+			}, body))
 		}
 	}()
 
@@ -176,21 +191,21 @@ func (h *STOMPHandler) handleDISCONNECT(ws *WebSocketConn, frame Frame) error {
 	return nil
 }
 
-func PublishDownloadProgress(events EventBus, taskID int64, progress int) error {
+func PublishDownloadProgress(eventsBus *events.Bus, taskID int64, progress int) error {
 	body, _ := json.Marshal(map[string]interface{}{
 		"type":     "DownloadProgressEvent",
 		"taskId":   taskID,
 		"progress": progress,
 	})
-	return events.Publish("/topic/downloads/"+formatInt(taskID), body)
+	return eventsBus.Publish("/topic/downloads/"+formatInt(taskID), body)
 }
 
-func PublishSearchCompleted(events EventBus, jobID int64) error {
+func PublishSearchCompleted(eventsBus *events.Bus, jobID int64) error {
 	body, _ := json.Marshal(map[string]interface{}{
 		"type":  "SearchCompletedEvent",
 		"jobId": jobID,
 	})
-	return events.Publish("/topic/search/jobs/"+formatInt(jobID), body)
+	return eventsBus.Publish("/topic/search/jobs/"+formatInt(jobID), body)
 }
 
 func formatInt(n int64) string {
