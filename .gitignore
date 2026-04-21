@@ -2,24 +2,24 @@
 **/target/
 
 # IDE metadata
-Backend/.classpath
-Backend/.project
-Backend/.settings/
+legacy/java-backend/.classpath
+legacy/java-backend/.project
+legacy/java-backend/.settings/
 
 # Logs and local runtime output
 *.log
 *.err
 logs/
 .tmp/
-BackendGo/.gocache/
+.worktrees/
 
 # Local secrets
 .env
 *.env
-Backend/application-local.yml
+legacy/java-backend/application-local.yml
 
-# Ignore entire Backend directory (Java reference, not Go migration target)
-/Backend/
+# Ignore legacy Java backend directory
+/legacy/
 
 # Ignore entire docs directory (plans and reviews)
 /docs/
@@ -31,3 +31,11 @@ STARTUP.md
 TORRENT_SEARCH_WORKFLOW.md
 DOWNLOAD_WORKER_WORKFLOW.md
 prepare.md
+
+# Go backend artifacts
+Backend/backend-go.exe
+Backend/backend-go
+Backend/*.test
+Backend/coverage.out
+Backend/tmp/
+Backend/.gocache/

@@ -1,0 +1,114 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: netflixtorrent-postgres
+    environment:
+      POSTGRES_DB: netflixtorrent
+      POSTGRES_USER: netflixtorrent
+      POSTGRES_PASSWORD: local_postgres_password
+    ports:
+      - "15433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netflixtorrent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: netflixtorrent-qbittorrent
+    environment:
+      PUID: 1000
+      PGID: 1000
+      WEBUI_PORT: 18082
+    ports:
+      - "18082:8080"
+      - "16881:6881"
+      - "16881:6881/udp"
+    volumes:
+      - qbittorrent_config:/config
+      - qbittorrent_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18082"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: netflixtorrent-prowlarr
+    environment:
+      PUID: 1000
+      PGID: 1000
+      WEBUI_PORT: 19696
+    ports:
+      - "19696:9696"
+    volumes:
+      - prowlarr_config:/config
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19696"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: netflixtorrent-jackett
+    environment:
+      PUID: 1000
+      PGID: 1000
+      WEBUI_PORT: 19117
+    ports:
+      - "19117:9117"
+    volumes:
+      - jackett_config:/config
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19117"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  backend-go:
+    build:
+      context: .
+      dockerfile: Dockerfile.local-backend-go
+    container_name: netflixtorrent-backend-go
+    environment:
+      APP_MODE: desktop
+      SPRING_PROFILES_ACTIVE: worker,desktop
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: 18081
+      APP_BIND_LOCALHOST_ONLY: false
+      APP_LOCAL_TOKEN_ENABLED: true
+      APP_LOCAL_TOKEN: token
+      DB_URL: jdbc:postgresql://postgres:5432/netflixtorrent
+      DB_USERNAME: netflixtorrent
+      DB_PASSWORD: local_postgres_password
+      DOWNLOAD_DEFAULT_SAVE_PATH: /data/media
+      FFPROBE_PATH: ffprobe
+      TORRENT_SEARCH_PROVIDER: prowlarr
+    ports:
+      - "18081:18081"
+    volumes:
+      - media_data:/data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18081/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres_data:
+  qbittorrent_config:
+  qbittorrent_data:
+  prowlarr_config:
+  jackett_config:
+  media_data:
