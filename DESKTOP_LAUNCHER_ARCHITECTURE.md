@@ -1,14 +1,13 @@
 # Desktop Launcher Architecture
 
-Ngay cap nhat: 2026-04-20
+Ngay cap nhat: 2026-04-21
 
-Muc tieu phan phoi:
+## Muc tieu phan phoi:
 
 ```text
 NetflixTorrent.exe
   -> bundled GUI
-  -> bundled JRE
-  -> backend jar, profiles worker,desktop
+  -> backend executable, profiles worker,desktop
   -> PostgreSQL/qBittorrent/Prowlarr or Jackett sidecars
   -> ffprobe
 ```
@@ -22,7 +21,7 @@ Launcher la process cha. No phai:
 - Start PostgreSQL sidecar.
 - Start qBittorrent sidecar.
 - Start Prowlarr hoac Jackett sidecar.
-- Start backend jar voi `SPRING_PROFILES_ACTIVE=worker,desktop`.
+- Start backend executable voi `SPRING_PROFILES_ACTIVE=worker,desktop`.
 - Cho backend healthy.
 - Mo desktop GUI.
 - Stop child processes khi app thoat.
@@ -50,8 +49,7 @@ Installer/app bundle:
 ```text
 NetflixTorrent\
   NetflixTorrent.exe
-  runtime\jre\
-  backend\backend.jar
+  backend\backend.exe
   sidecars\
     postgres\
     qbittorrent\
@@ -66,10 +64,7 @@ NetflixTorrent\
 Shape:
 
 ```powershell
-runtime\jre\bin\java.exe `
-  -jar backend\backend.jar `
-  --spring.profiles.active=worker,desktop `
-  --spring.config.additional-location=file:%LOCALAPPDATA%\NetflixTorrent\config\application-desktop.yml
+backend\backend.exe
 ```
 
 Required env/config:
@@ -77,18 +72,23 @@ Required env/config:
 ```env
 SERVER_ADDRESS=127.0.0.1
 SERVER_PORT=18080
+SPRING_PROFILES_ACTIVE=worker,desktop
 DB_URL=jdbc:postgresql://127.0.0.1:15432/netflixtorrent
 DB_USERNAME=netflixtorrent
 DB_PASSWORD=<generated-or-installer-secret>
+APP_LOCAL_TOKEN_ENABLED=true
+APP_LOCAL_TOKEN=<random-token>
+APP_BIND_LOCALHOST_ONLY=false
 QBITTORRENT_URL=http://127.0.0.1:18082
 QBITTORRENT_USERNAME=admin
 QBITTORRENT_PASSWORD=<qbit-password>
 PROWLARR_URL=http://127.0.0.1:19696
 PROWLARR_API_KEY=<api-key>
+JACKETT_URL=http://127.0.0.1:19117
+JACKETT_API_KEY=<api-key>
 DOWNLOAD_DEFAULT_SAVE_PATH=%LOCALAPPDATA%\NetflixTorrent\media\Movies
-APP_LOCAL_TOKEN_ENABLED=true
-APP_LOCAL_TOKEN=<random-token>
 FFPROBE_PATH=<bundle>\sidecars\ffmpeg\ffprobe.exe
+TORRENT_SEARCH_PROVIDER=prowlarr
 ```
 
 ## 4. Sidecar Ports
@@ -108,7 +108,7 @@ Tat ca phai bind `127.0.0.1`.
 1. Kiem tra data directories.
 2. Neu chua co config, tao config mac dinh.
 3. Sinh DB password/local token.
-4. Start PostgreSQL va apply Flyway qua backend startup.
+4. Start PostgreSQL.
 5. Start qBittorrent.
 6. Start Prowlarr hoac Jackett.
 7. Start backend.
@@ -129,22 +129,39 @@ Write request gui can gui:
 X-App-Local-Token: <launcher token>
 ```
 
-## 7. Local E2E Before Launcher
+## 7. Local E2E With Docker
 
 Dung:
 
 ```powershell
-docker compose -f docker-compose.local.yml up -d --build postgres qbittorrent prowlarr jackett backend
+docker compose -f docker-compose.go-local.yml up -d --build postgres backend-go
 ```
 
 Local Docker E2E khac launcher o cho sidecars chay trong container. No van giu backend mot process voi `worker,desktop`, va backend/qBittorrent share `/data/media` de test download/post-process.
 
-## 8. Remaining Launcher Work
+## 8. Backend Go Commands
 
-- Tao launcher app.
-- Bundle JRE va sidecars.
-- Quan ly process lifecycle.
-- Persist runtime config.
-- First-run setup wizard.
-- Log viewer/diagnostics UI.
-- Installer/updater.
+Test:
+
+```powershell
+cd Backend
+go test ./...
+```
+
+Run locally:
+
+```powershell
+cd Backend
+go run ./cmd/backend
+```
+
+Build:
+
+```powershell
+cd Backend
+go build -o backend.exe ./cmd/backend
+```
+
+## 9. Legacy
+
+Java backend duoc luu tru tai `legacy/java-backend/` chi de tham khao migration.
