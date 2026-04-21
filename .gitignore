@@ -39,3 +39,6 @@ Backend/*.test
 Backend/coverage.out
 Backend/tmp/
 Backend/.gocache/
+
+# Local tools
+/tools/
