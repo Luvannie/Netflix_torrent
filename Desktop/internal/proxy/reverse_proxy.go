@@ -15,21 +15,19 @@ type Config struct {
 func NewReverseProxy(cfg Config) http.Handler {
 	target, err := url.Parse(cfg.TargetBaseURL)
 	if err != nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, "invalid upstream target", http.StatusInternalServerError)
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "invalid upstream", http.StatusInternalServerError)
 		})
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	originalDirector := proxy.Director
-
+	director := proxy.Director
 	proxy.Director = func(r *http.Request) {
-		originalDirector(r)
+		director(r)
 		if needsLocalToken(r.Method, r.URL.Path) && strings.TrimSpace(cfg.LocalToken) != "" {
 			r.Header.Set("X-App-Local-Token", cfg.LocalToken)
 		}
 	}
-
 	return proxy
 }
 
@@ -42,5 +40,6 @@ func needsLocalToken(method, path string) bool {
 
 	return strings.HasPrefix(path, "/api/v1/search/jobs") ||
 		strings.HasPrefix(path, "/api/v1/downloads") ||
-		strings.HasPrefix(path, "/api/v1/settings")
+		strings.HasPrefix(path, "/api/v1/settings") ||
+		strings.HasPrefix(path, "/api/v1/library")
 }

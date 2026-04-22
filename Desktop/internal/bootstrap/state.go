@@ -3,11 +3,12 @@ package bootstrap
 type Step string
 
 const (
-	StepIdle            Step = "IDLE"
-	StepStartingBackend Step = "STARTING_BACKEND"
-	StepWaitingHealth   Step = "WAITING_HEALTH"
-	StepReady           Step = "READY"
-	StepFailed          Step = "FAILED"
+	StepIdle             Step = "IDLE"
+	StepAcquiringLock    Step = "ACQUIRING_LOCK"
+	StepStartingServices Step = "STARTING_SERVICES"
+	StepWaitingHealth    Step = "WAITING_HEALTH"
+	StepReady            Step = "READY"
+	StepFailed           Step = "FAILED"
 )
 
 type State struct {

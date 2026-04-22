@@ -20,7 +20,7 @@ Tai lieu tham chieu chinh:
 ## Hien trang
 
 - `Backend/`: da co core API va runtime flow co ban
-- `Desktop/`: moi o muc scaffold va proxy contract
+- `Desktop/`: da co runtime foundation slice gom config store, instance lock, process manager, diagnostics, bootstrap state, proxy token injection
 - `frontend/`: moi o muc shell + typed API contracts, chua co UI flow that
 - Packaging/release: chua co
 
@@ -29,17 +29,17 @@ Tai lieu tham chieu chinh:
 - [ ] Dung Wails app that trong `Desktop/`, khong chi la scaffold `main.go/app.go`
 - [ ] Tao startup lifecycle day du: start PostgreSQL, qBittorrent, Prowlarr/Jackett, `backend.exe`
 - [ ] Hoan thien graceful shutdown cho backend va tat ca sidecars
-- [ ] Tao single-instance lock cho desktop app
+- [x] Tao single-instance lock cho desktop app
 - [ ] Hoan thien `internal/proxy` de proxy REST va stream toi backend
-- [ ] Inject `X-App-Local-Token` trong Desktop proxy cho protected write APIs
+- [x] Inject `X-App-Local-Token` trong Desktop proxy cho protected write APIs
 - [ ] Hoan thien native bridge: chon folder, mo log, restart sidecar, quit app
-- [ ] Hoan thien runtime config loader/saver trong `Desktop/internal/config`
+- [x] Hoan thien runtime config loader/saver trong `Desktop/internal/config`
 - [ ] Luu secrets local an toan bang DPAPI hoac co che tuong duong tren Windows
-- [ ] Hoan thien diagnostics snapshot va startup failure reporting
+- [x] Hoan thien diagnostics snapshot va startup failure reporting
 
 ## Milestone 2: First-Run va Runtime Ownership
 
-- [ ] Tao directory layout trong `%LOCALAPPDATA%\NetflixTorrent`
+- [ ] Tao directory layout trong `%LOCALAPPDATA%\\NetflixTorrent`
 - [ ] Sinh local token, DB password, qBittorrent password o first run
 - [ ] Bootstrap Postgres data directory va database `netflixtorrent`
 - [ ] Bootstrap qBittorrent config va WebUI localhost bind
@@ -142,9 +142,9 @@ Tai lieu tham chieu chinh:
 ## Milestone 8: Testing va QA
 
 - [ ] Chay `go test ./...` cho `Backend/`
-- [ ] Chay `go test ./...` cho `Desktop/`
+- [x] Chay `go test ./...` cho `Desktop/`
 - [ ] Dung frontend unit tests cho API client, bindings adapter, query flows, route logic
-- [ ] Dung integration tests cho Desktop proxy va bootstrap logic
+- [x] Dung integration tests cho Desktop proxy va bootstrap logic
 - [ ] Dung E2E test cho startup -> setup -> catalog -> search -> download -> library -> player
 - [ ] Test fresh install tren may Windows sach
 - [ ] Test upgrade tu version cu

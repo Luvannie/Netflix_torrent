@@ -1,12 +1,13 @@
 # Desktop Shell
 
-This directory is the native desktop shell for the future Wails application.
+Milestone 1 builds the native runtime core that the future Wails shell will host.
 
 Current scope:
 
-- runtime/bootstrap contracts
-- reverse proxy contract for backend HTTP calls
-- bridge/config/process/diagnostics package boundaries
+- persisted launcher config
+- single-instance lock
+- process supervision contracts for backend and sidecars
+- bootstrap state and diagnostics snapshots
+- reverse proxy contract for backend HTTP traffic
 
-This scaffold intentionally avoids the full Wails runtime wiring for now so the package layout and contracts can stabilize before UI implementation begins.
-
+The full Wails runtime wiring remains a follow-up once the Desktop runtime contracts are stable.
