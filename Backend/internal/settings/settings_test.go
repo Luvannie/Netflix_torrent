@@ -1,9 +1,11 @@
 package settings
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,18 +14,19 @@ import (
 )
 
 func TestPathResolverReplacesSpecialCharacters(t *testing.T) {
-	resolver := NewPathResolver([]string{"/data"})
+	base := t.TempDir()
+	resolver := NewPathResolver([]string{base})
 
 	tests := []struct {
 		input    string
 		expected string
 	}{
-		{"path<with>special", "path_with_special"},
-		{"path:with:colons", "path_with_colons"},
-		{`path"with"quotes`, "path_with_quotes"},
-		{"path|with|pipes", "path_with_pipes"},
-		{"path?with?question", "path_with_question"},
-		{"path*with*asterisks", "path_with_asterisks"},
+		{filepath.Join(base, "path<with>special"), filepath.Join(base, "path_with_special")},
+		{filepath.Join(base, "path:with:colons"), filepath.Join(base, "path_with_colons")},
+		{filepath.Join(base, `path"with"quotes`), filepath.Join(base, "path_with_quotes")},
+		{filepath.Join(base, "path|with|pipes"), filepath.Join(base, "path_with_pipes")},
+		{filepath.Join(base, "path?with?question"), filepath.Join(base, "path_with_question")},
+		{filepath.Join(base, "path*with*asterisks"), filepath.Join(base, "path_with_asterisks")},
 	}
 
 	for _, test := range tests {
@@ -31,30 +34,43 @@ func TestPathResolverReplacesSpecialCharacters(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ResolveAndValidate(%q) error = %v", test.input, err)
 		}
-		if !strings.Contains(result, "path_with") {
-			t.Errorf("ResolveAndValidate(%q) = %q, should replace special chars", test.input, result)
+		if result != test.expected {
+			t.Errorf("ResolveAndValidate(%q) = %q, want %q", test.input, result, test.expected)
 		}
 	}
 }
 
 func TestPathResolverRejectsTraversalSegments(t *testing.T) {
-	resolver := NewPathResolver([]string{"/data"})
+	base := t.TempDir()
+	resolver := NewPathResolver([]string{base})
 
-	_, err := resolver.ResolveAndValidate("/data/../../etc/passwd")
+	_, err := resolver.ResolveAndValidate(filepath.Join(base, "..", "etc", "passwd"))
 	if err == nil {
 		t.Fatalf("ResolveAndValidate should reject traversal")
 	}
 }
 
 func TestPathResolverValidatesWithinAllowedBases(t *testing.T) {
-	resolver := NewPathResolver([]string{"/data", "/tmp"})
+	base := t.TempDir()
+	resolver := NewPathResolver([]string{base})
 
-	result, err := resolver.ResolveAndValidate("/data/media/movies")
+	result, err := resolver.ResolveAndValidate(filepath.Join(base, "media", "movies"))
 	if err != nil {
 		t.Fatalf("ResolveAndValidate error = %v", err)
 	}
-	if !strings.Contains(result, "media") {
-		t.Errorf("Result = %q, should contain media", result)
+	if result != filepath.Join(base, "media", "movies") {
+		t.Errorf("Result = %q", result)
+	}
+}
+
+func TestPathResolverRejectsPathOutsideAllowedBases(t *testing.T) {
+	allowedBase := t.TempDir()
+	outsideBase := t.TempDir()
+	resolver := NewPathResolver([]string{allowedBase})
+
+	_, err := resolver.ResolveAndValidate(filepath.Join(outsideBase, "movies"))
+	if err == nil {
+		t.Fatal("ResolveAndValidate should reject a path outside the allowed base")
 	}
 }
 
@@ -260,5 +276,104 @@ func TestHealthHandlerWithSettingsRoute(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+type fakeSettingsRepo struct {
+	created    CreateStorageProfileRequest
+	updatedID  int64
+	updated    UpdateStorageProfileRequest
+	createHits int
+	updateHits int
+}
+
+func (f *fakeSettingsRepo) List(ctx context.Context) ([]StorageProfile, error) {
+	return []StorageProfile{}, nil
+}
+
+func (f *fakeSettingsRepo) GetByID(ctx context.Context, id int64) (*StorageProfile, error) {
+	return &StorageProfile{ID: id, Name: "Movies", BasePath: filepath.Join(os.TempDir(), "movies"), Priority: 1, Active: true}, nil
+}
+
+func (f *fakeSettingsRepo) Create(ctx context.Context, req CreateStorageProfileRequest) (*StorageProfile, error) {
+	f.createHits++
+	f.created = req
+	return &StorageProfile{ID: 1, Name: req.Name, BasePath: req.BasePath, Priority: 1, Active: true}, nil
+}
+
+func (f *fakeSettingsRepo) Update(ctx context.Context, id int64, req UpdateStorageProfileRequest) (*StorageProfile, error) {
+	f.updateHits++
+	f.updatedID = id
+	f.updated = req
+
+	basePath := filepath.Join(os.TempDir(), "updated")
+	if req.BasePath != nil {
+		basePath = *req.BasePath
+	}
+
+	return &StorageProfile{ID: id, Name: "Updated", BasePath: basePath, Priority: 1, Active: true}, nil
+}
+
+func (f *fakeSettingsRepo) Delete(ctx context.Context, id int64) error {
+	return nil
+}
+
+func TestCreateHandlerUsesSanitizedResolvedBasePath(t *testing.T) {
+	allowedBase := t.TempDir()
+	repo := &fakeSettingsRepo{}
+	handler := NewHandler(repo, NewPathResolver([]string{allowedBase}))
+
+	rawPath := filepath.Join(allowedBase, "media", ".", "movies")
+	body, err := json.Marshal(map[string]any{
+		"name":     "Movies",
+		"basePath": rawPath,
+		"priority": 1,
+		"active":   true,
+	})
+	if err != nil {
+		t.Fatalf("Marshal error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/storage-profiles", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.create(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if repo.createHits != 1 {
+		t.Fatalf("createHits = %d", repo.createHits)
+	}
+
+	expected := filepath.Join(allowedBase, "media", "movies")
+	if repo.created.BasePath != expected {
+		t.Fatalf("BasePath = %q, want %q", repo.created.BasePath, expected)
+	}
+}
+
+func TestUpdateHandlerRejectsPathOutsideAllowedBase(t *testing.T) {
+	allowedBase := t.TempDir()
+	outsideBase := t.TempDir()
+	repo := &fakeSettingsRepo{}
+	handler := NewHandler(repo, NewPathResolver([]string{allowedBase}))
+
+	body, err := json.Marshal(map[string]any{
+		"basePath": filepath.Join(outsideBase, "movies"),
+	})
+	if err != nil {
+		t.Fatalf("Marshal error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/storage-profiles/5", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.update(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if repo.updateHits != 0 {
+		t.Fatalf("updateHits = %d, want 0", repo.updateHits)
 	}
 }

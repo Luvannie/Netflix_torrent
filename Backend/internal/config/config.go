@@ -59,6 +59,7 @@ type TMDBConfig struct {
 type SearchConfig struct {
 	Provider   string
 	MaxResults int
+	PollRateMS int
 }
 
 type QBittorrentConfig struct {
@@ -123,6 +124,7 @@ func Load() Config {
 		Search: SearchConfig{
 			Provider:   strings.ToLower(envString("TORRENT_SEARCH_PROVIDER", "jackett")),
 			MaxResults: envInt("TORRENT_SEARCH_MAX_RESULTS", 50),
+			PollRateMS: envInt("SEARCH_WORKER_POLL_MS", 3000),
 		},
 		QBittorrent: QBittorrentConfig{
 			BaseURL:  envString("QBITTORRENT_URL", "http://qbittorrent:8082"),

@@ -38,7 +38,9 @@ Backend/backend-go
 Backend/*.test
 Backend/coverage.out
 Backend/tmp/
-Backend/.gocache/
+**/.gocache/
+Backend/vendor/
+.gotmp*/
 
 # Local tools
 /tools/

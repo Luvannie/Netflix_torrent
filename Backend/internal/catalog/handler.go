@@ -46,7 +46,7 @@ func (h *Handler) listCatalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getByID(w http.ResponseWriter, r *http.Request) {
-	id, err := parsePathID(r.URL.Path, 3)
+	id, err := parsePathID(r.URL.Path, 1)
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid movie ID", nil, httpx.InboundRequestID(r))
 		return
@@ -62,7 +62,7 @@ func (h *Handler) getByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getByTmdbID(w http.ResponseWriter, r *http.Request) {
-	tmdbID, err := parsePathID(r.URL.Path, 4)
+	tmdbID, err := parsePathID(r.URL.Path, 1)
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid TMDB ID", nil, httpx.InboundRequestID(r))
 		return
@@ -170,9 +170,9 @@ func (h *Handler) discover(w http.ResponseWriter, r *http.Request) {
 }
 
 func parsePathID(path string, segmentIndex int) (int64, error) {
-	parts := strings.Split(path, "/")
-	if segmentIndex >= len(parts) {
-		return 0, nil
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if segmentIndex <= 0 || segmentIndex > len(parts) {
+		return 0, strconv.ErrSyntax
 	}
 	idStr := parts[len(parts)-segmentIndex]
 	return strconv.ParseInt(idStr, 10, 64)

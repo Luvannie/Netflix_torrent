@@ -120,12 +120,8 @@ type PersonSearchResult struct {
 }
 
 func (c *TMDBClient) get(ctx context.Context, path string, params url.Values, result interface{}) error {
-	baseURL := c.BaseURL
-	if !strings.HasSuffix(baseURL, "/") {
-		baseURL += "/"
-	}
-
-	reqURL := baseURL + "3" + path
+	baseURL := strings.TrimRight(c.BaseURL, "/")
+	reqURL := baseURL + path
 	if params != nil {
 		reqURL += "?" + params.Encode()
 	}

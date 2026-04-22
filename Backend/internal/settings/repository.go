@@ -2,8 +2,10 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -45,6 +47,9 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*StorageProfile, er
 		WHERE id=$1
 	`, id).Scan(&p.ID, &p.Name, &p.BasePath, &p.Priority, &p.Active)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, NotFoundError{ID: id}
+		}
 		return nil, err
 	}
 	return &p, nil

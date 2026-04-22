@@ -15,6 +15,7 @@ func NewPathResolver(allowedBases []string) *PathResolver {
 }
 
 func (r *PathResolver) ResolveAndValidate(rawPath string) (string, error) {
+	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
 		return "", ValidationError{Field: "basePath", Message: "Base path is required"}
 	}
@@ -23,62 +24,75 @@ func (r *PathResolver) ResolveAndValidate(rawPath string) (string, error) {
 		return "", ValidationError{Field: "basePath", Message: "Base path must not exceed 1000 characters"}
 	}
 
-	if strings.Contains(rawPath, "..") {
+	if containsTraversalSegment(rawPath) {
 		return "", ValidationError{Field: "basePath", Message: "Base path must not contain traversal segments"}
 	}
 
 	cleaned := r.cleanPath(rawPath)
+	absCleaned, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", ValidationError{Field: "basePath", Message: "Base path is invalid"}
+	}
+
+	if len(r.allowedBases) == 0 {
+		return absCleaned, nil
+	}
 
 	for _, base := range r.allowedBases {
-		absBase, err := filepath.Abs(base)
-		if err != nil {
-			continue
-		}
-		absCleaned, err := filepath.Abs(cleaned)
-		if err != nil {
-			continue
-		}
-
-		rel, err := filepath.Rel(absBase, absCleaned)
-		if err != nil {
-			continue
-		}
-
-		if !strings.HasPrefix(rel, "..") {
-			return cleaned, nil
+		if pathWithinBase(absCleaned, base) {
+			return absCleaned, nil
 		}
 	}
 
-	return cleaned, nil
+	return "", ValidationError{Field: "basePath", Message: "Base path must stay within an allowed storage root"}
 }
 
 func (r *PathResolver) cleanPath(raw string) string {
-	result := raw
+	volume := filepath.VolumeName(raw)
+	trimmed := strings.TrimPrefix(raw, volume)
+	isAbs := filepath.IsAbs(raw)
+
 	replacer := strings.NewReplacer(
 		"<", "_",
 		">", "_",
-		":", "_",
 		`"`, "_",
 		"|", "_",
 		"?", "_",
 		"*", "_",
+		":", "_",
 	)
 
-	result = replacer.Replace(result)
-
-	parts := strings.Split(result, string(filepath.Separator))
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
 	var cleanParts []string
 	for _, part := range parts {
-		if part == ".." {
-			if len(cleanParts) > 0 {
-				cleanParts = cleanParts[:len(cleanParts)-1]
-			}
-		} else if part != "" && part != "." {
-			cleanParts = append(cleanParts, part)
+		if part == "" || part == "." || part == ".." {
+			continue
 		}
+		cleanParts = append(cleanParts, replacer.Replace(part))
 	}
 
-	return filepath.Join(cleanParts...)
+	joined := filepath.Join(cleanParts...)
+	if volume != "" && isAbs {
+		if joined == "" {
+			return volume + string(filepath.Separator)
+		}
+		return filepath.Join(volume+string(filepath.Separator), joined)
+	}
+	if isAbs {
+		if joined == "" {
+			return string(filepath.Separator)
+		}
+		return filepath.Join(string(filepath.Separator), joined)
+	}
+	if volume != "" {
+		if joined == "" {
+			return volume + string(filepath.Separator)
+		}
+		return filepath.Join(volume+string(filepath.Separator), joined)
+	}
+	return joined
 }
 
 func (r *PathResolver) IsWritable(path string) error {
@@ -102,3 +116,29 @@ func (r *PathResolver) IsWritable(path string) error {
 }
 
 var _ = strings.Contains
+
+func containsTraversalSegment(rawPath string) bool {
+	parts := strings.FieldsFunc(rawPath, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	for _, part := range parts {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func pathWithinBase(path string, base string) bool {
+	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return false
+	}
+
+	rel, err := filepath.Rel(absBase, path)
+	if err != nil {
+		return false
+	}
+
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}

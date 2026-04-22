@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -63,21 +64,45 @@ func main() {
 	mux.Handle("GET /api/v1/health", health.Handler())
 
 	searchRepo := search.NewRepository(pool)
+	var jackettClient search.ProviderClient
+	if cfg.Search.Provider == "jackett" || cfg.Search.Provider == "both" {
+		if strings.TrimSpace(cfg.Jackett.BaseURL) != "" && strings.TrimSpace(cfg.Jackett.APIKey) != "" {
+			jackettClient = search.NewJackettClient(cfg.Jackett.BaseURL, cfg.Jackett.APIKey, cfg.Jackett.Indexers)
+		}
+	}
+	var prowlarrClient search.ProviderClient
+	if cfg.Search.Provider == "prowlarr" || cfg.Search.Provider == "both" {
+		if strings.TrimSpace(cfg.Prowlarr.BaseURL) != "" && strings.TrimSpace(cfg.Prowlarr.APIKey) != "" {
+			prowlarrClient = search.NewProwlarrClient(cfg.Prowlarr.BaseURL, cfg.Prowlarr.APIKey)
+		}
+	}
 	searchService := search.NewService(
 		searchRepo,
-		nil,
-		nil,
+		jackettClient,
+		prowlarrClient,
 		cfg.Search.Provider,
 	)
+	searchWorkerCtx, cancelSearchWorker := context.WithCancel(context.Background())
+	defer cancelSearchWorker()
+	searchPollRate := time.Duration(cfg.Search.PollRateMS) * time.Millisecond
+	if searchPollRate < time.Second {
+		searchPollRate = time.Second
+	}
+	searchWorker := search.NewWorker(searchRepo, searchService, searchPollRate, logger.With("component", "search-worker"))
+	go searchWorker.Start(searchWorkerCtx)
 	searchHandler := search.NewHandler(searchService)
 	for pattern, handler := range searchHandler.Routes() {
 		mux.Handle(pattern, handler)
 	}
 
 	downloadsRepo := downloads.NewRepository(pool)
+	var torrentClient *downloads.QBittorrentClient
+	if strings.TrimSpace(cfg.QBittorrent.BaseURL) != "" {
+		torrentClient = downloads.NewQBittorrentClient(cfg.QBittorrent.BaseURL, cfg.QBittorrent.Username, cfg.QBittorrent.Password)
+	}
 	downloadsService := downloads.NewService(
 		downloadsRepo,
-		nil,
+		torrentClient,
 		nil,
 	)
 	downloadsHandler := downloads.NewHandler(downloadsService)
@@ -101,7 +126,7 @@ func main() {
 	}
 
 	settingsRepo := settings.NewRepository(pool)
-	settingsHandler := settings.NewHandler(settingsRepo, settings.NewPathResolver([]string{}))
+	settingsHandler := settings.NewHandler(settingsRepo, settings.NewPathResolver([]string{cfg.Download.DefaultSavePath}))
 	for pattern, handler := range settingsHandler.Routes() {
 		mux.Handle(pattern, handler)
 	}
@@ -113,7 +138,10 @@ func main() {
 		StoragePath:    cfg.Download.DefaultSavePath,
 		FFProbePath:    cfg.FFprobe.Path,
 		QBittorrentURL: cfg.QBittorrent.BaseURL,
+		JackettURL:     cfg.Jackett.BaseURL,
+		ProwlarrURL:    cfg.Prowlarr.BaseURL,
 		SearchProvider: cfg.Search.Provider,
+		ProbeTimeout:   2 * time.Second,
 	}
 	systemHandler := system.Handler(systemService)
 	mux.Handle("GET /api/v1/system/status", systemHandler)
@@ -162,6 +190,8 @@ func main() {
 	<-quit
 
 	logger.Info("shutting down server")
+	cancelSearchWorker()
+	searchWorker.Stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

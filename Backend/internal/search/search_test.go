@@ -1,8 +1,11 @@
 package search
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 )
 
 func TestSearchJobStatusTransitions(t *testing.T) {
@@ -132,5 +135,130 @@ func TestCreateSearchJobRequestStructure(t *testing.T) {
 
 	if req.Query != "fight club" {
 		t.Errorf("Query = %q", req.Query)
+	}
+}
+
+type fakeSearchRepo struct {
+	job             SearchJob
+	statusUpdates   []SearchJobStatus
+	statusMessages  []string
+	savedResults    []SearchResult
+}
+
+func (f *fakeSearchRepo) CreateJob(ctx context.Context, query string) (int64, error) {
+	return 1, nil
+}
+
+func (f *fakeSearchRepo) GetJob(ctx context.Context, id int64) (*SearchJob, error) {
+	return &f.job, nil
+}
+
+func (f *fakeSearchRepo) ListJobs(ctx context.Context, queryFilter string, limit, offset int) ([]SearchJob, int64, error) {
+	return nil, 0, nil
+}
+
+func (f *fakeSearchRepo) CancelJob(ctx context.Context, id int64) error {
+	return nil
+}
+
+func (f *fakeSearchRepo) UpdateJobStatus(ctx context.Context, id int64, status SearchJobStatus, errorMsg string) error {
+	f.statusUpdates = append(f.statusUpdates, status)
+	f.statusMessages = append(f.statusMessages, errorMsg)
+	return nil
+}
+
+func (f *fakeSearchRepo) SaveResults(ctx context.Context, id int64, results []SearchResult) error {
+	f.savedResults = append(f.savedResults, results...)
+	return nil
+}
+
+func (f *fakeSearchRepo) GetJobResults(ctx context.Context, id int64) ([]SearchResult, error) {
+	return nil, nil
+}
+
+type fakeProviderClient struct {
+	results []NormalizedResult
+	err     error
+}
+
+func (f *fakeProviderClient) Search(ctx context.Context, query string) ([]NormalizedResult, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.results, nil
+}
+
+func TestProcessJobFailsWhenConfiguredProviderClientIsMissing(t *testing.T) {
+	repo := &fakeSearchRepo{
+		job: SearchJob{ID: 7, Query: "matrix", Status: StatusRequested},
+	}
+	service := NewService(repo, nil, nil, "jackett")
+
+	err := service.ProcessJob(context.Background(), 7)
+	if err == nil {
+		t.Fatal("ProcessJob should fail when the active provider client is not configured")
+	}
+
+	if len(repo.statusUpdates) != 2 {
+		t.Fatalf("statusUpdates = %d, want 2", len(repo.statusUpdates))
+	}
+	if repo.statusUpdates[0] != StatusSearching {
+		t.Fatalf("first status = %s, want SEARCHING", repo.statusUpdates[0])
+	}
+	if repo.statusUpdates[1] != StatusFailed {
+		t.Fatalf("second status = %s, want FAILED", repo.statusUpdates[1])
+	}
+	if repo.statusMessages[1] == "" {
+		t.Fatal("failed status should include a reason")
+	}
+}
+
+func TestProcessJobSavesResultsWhenProviderReturnsMatches(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &fakeSearchRepo{
+		job: SearchJob{ID: 8, Query: "matrix", Status: StatusRequested},
+	}
+	service := NewService(repo, &fakeProviderClient{
+		results: []NormalizedResult{{
+			Title:    "Matrix 1999 1080p",
+			Guid:     "guid-1",
+			Link:     "https://example.com/download",
+			Permalink: "https://example.com/torrent/1",
+			Size:     1234,
+			PubDate:  &now,
+			Seeders:  10,
+			Leechers: 2,
+			Indexer:  "TestIndexer",
+			Provider: "jackett",
+			Hash:     "abc",
+			Score:    99,
+		}},
+	}, nil, "jackett")
+
+	if err := service.ProcessJob(context.Background(), 8); err != nil {
+		t.Fatalf("ProcessJob returned error: %v", err)
+	}
+
+	if len(repo.savedResults) != 1 {
+		t.Fatalf("savedResults = %d, want 1", len(repo.savedResults))
+	}
+	if got := repo.statusUpdates[len(repo.statusUpdates)-1]; got != StatusSearchReady {
+		t.Fatalf("final status = %s, want SEARCH_READY", got)
+	}
+}
+
+func TestProcessJobFailsWhenAllActiveProvidersReturnErrors(t *testing.T) {
+	repo := &fakeSearchRepo{
+		job: SearchJob{ID: 9, Query: "matrix", Status: StatusRequested},
+	}
+	service := NewService(repo, &fakeProviderClient{err: errors.New("jackett down")}, nil, "jackett")
+
+	err := service.ProcessJob(context.Background(), 9)
+	if err == nil {
+		t.Fatal("ProcessJob should fail when the active provider returns an error and no results")
+	}
+
+	if got := repo.statusUpdates[len(repo.statusUpdates)-1]; got != StatusFailed {
+		t.Fatalf("final status = %s, want FAILED", got)
 	}
 }

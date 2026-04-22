@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -11,11 +12,19 @@ import (
 )
 
 type Handler struct {
-	repo        *Repository
+	repo         storageProfileStore
 	pathResolver *PathResolver
 }
 
-func NewHandler(repo *Repository, pathResolver *PathResolver) *Handler {
+type storageProfileStore interface {
+	List(ctx context.Context) ([]StorageProfile, error)
+	GetByID(ctx context.Context, id int64) (*StorageProfile, error)
+	Create(ctx context.Context, req CreateStorageProfileRequest) (*StorageProfile, error)
+	Update(ctx context.Context, id int64, req UpdateStorageProfileRequest) (*StorageProfile, error)
+	Delete(ctx context.Context, id int64) error
+}
+
+func NewHandler(repo storageProfileStore, pathResolver *PathResolver) *Handler {
 	return &Handler{repo: repo, pathResolver: pathResolver}
 }
 
@@ -86,10 +95,21 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.pathResolver != nil {
-		if _, err := h.pathResolver.ResolveAndValidate(req.BasePath); err != nil {
+		resolvedPath, err := h.pathResolver.ResolveAndValidate(req.BasePath)
+		if err != nil {
 			api.WriteError(w, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error(), nil, httpx.InboundRequestID(r))
 			return
 		}
+		req.BasePath = resolvedPath
+	}
+
+	if req.Priority == nil {
+		priority := 0
+		req.Priority = &priority
+	}
+	if req.Active == nil {
+		active := true
+		req.Active = &active
 	}
 
 	profile, err := h.repo.Create(r.Context(), req)
@@ -111,6 +131,15 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body", nil, httpx.InboundRequestID(r))
 		return
+	}
+
+	if req.BasePath != nil && h.pathResolver != nil {
+		resolvedPath, err := h.pathResolver.ResolveAndValidate(*req.BasePath)
+		if err != nil {
+			api.WriteError(w, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error(), nil, httpx.InboundRequestID(r))
+			return
+		}
+		req.BasePath = &resolvedPath
 	}
 
 	profile, err := h.repo.Update(r.Context(), id, req)

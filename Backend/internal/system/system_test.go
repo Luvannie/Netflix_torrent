@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/netflixtorrent/backend-go/internal/httpx"
 )
@@ -19,14 +21,26 @@ func (m *mockDBPinger) Ping(ctx context.Context) error {
 }
 
 func TestSystemStatusContainsAllComponentKeys(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	storageRoot := t.TempDir()
 	service := Service{
 		Mode:           "local",
 		ActiveProfiles: []string{"local"},
 		DBPing:         &mockDBPinger{},
-		StoragePath:    "/tmp/media",
+		StoragePath:    storageRoot,
 		FFProbePath:    "ffprobe",
-		QBittorrentURL: "http://localhost:8082",
-		SearchProvider: "jackett",
+		QBittorrentURL: server.URL,
+		JackettURL:     server.URL,
+		ProwlarrURL:    server.URL,
+		SearchProvider: "both",
+		httpClient:     server.Client(),
+		execLookPath: func(command string) (string, error) {
+			return command, nil
+		},
 	}
 
 	handler := httpx.RequestIDMiddleware(Handler(service))
@@ -56,14 +70,24 @@ func TestSystemStatusContainsAllComponentKeys(t *testing.T) {
 }
 
 func TestSystemStatusOverallIsDownWhenDatabaseIsDown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
 	service := Service{
 		Mode:           "local",
 		ActiveProfiles: []string{"local"},
 		DBPing:         &mockDBPinger{pingErr: context.DeadlineExceeded},
-		StoragePath:    "/tmp/media",
+		StoragePath:    t.TempDir(),
 		FFProbePath:    "ffprobe",
-		QBittorrentURL: "http://localhost:8082",
+		QBittorrentURL: server.URL,
+		JackettURL:     server.URL,
 		SearchProvider: "jackett",
+		httpClient:     server.Client(),
+		execLookPath: func(command string) (string, error) {
+			return command, nil
+		},
 	}
 
 	handler := httpx.RequestIDMiddleware(Handler(service))
@@ -82,14 +106,25 @@ func TestSystemStatusOverallIsDownWhenDatabaseIsDown(t *testing.T) {
 }
 
 func TestSystemStatusOverallIsUpWhenAllComponentsUp(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
 	service := Service{
 		Mode:           "local",
 		ActiveProfiles: []string{"local"},
 		DBPing:         &mockDBPinger{},
-		StoragePath:    "/tmp/media",
+		StoragePath:    t.TempDir(),
 		FFProbePath:    "ffprobe",
-		QBittorrentURL: "http://localhost:8082",
-		SearchProvider: "jackett",
+		QBittorrentURL: server.URL,
+		JackettURL:     server.URL,
+		ProwlarrURL:    server.URL,
+		SearchProvider: "both",
+		httpClient:     server.Client(),
+		execLookPath: func(command string) (string, error) {
+			return command, nil
+		},
 	}
 
 	handler := httpx.RequestIDMiddleware(Handler(service))
@@ -108,14 +143,25 @@ func TestSystemStatusOverallIsUpWhenAllComponentsUp(t *testing.T) {
 }
 
 func TestJackettDisabledWhenProviderIsProwlarr(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
 	service := Service{
 		Mode:           "desktop",
 		ActiveProfiles: []string{"desktop"},
 		DBPing:         &mockDBPinger{},
-		StoragePath:    "/data/media",
+		StoragePath:    t.TempDir(),
 		FFProbePath:    "ffprobe",
-		QBittorrentURL: "http://qbittorrent:8082",
+		QBittorrentURL: server.URL,
+		JackettURL:     server.URL,
+		ProwlarrURL:    server.URL,
 		SearchProvider: "prowlarr",
+		httpClient:     server.Client(),
+		execLookPath: func(command string) (string, error) {
+			return command, nil
+		},
 	}
 
 	status := service.Status(context.Background())
@@ -127,14 +173,25 @@ func TestJackettDisabledWhenProviderIsProwlarr(t *testing.T) {
 }
 
 func TestProwlarrDisabledWhenProviderIsJackett(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
 	service := Service{
 		Mode:           "desktop",
 		ActiveProfiles: []string{"desktop"},
 		DBPing:         &mockDBPinger{},
-		StoragePath:    "/data/media",
+		StoragePath:    t.TempDir(),
 		FFProbePath:    "ffprobe",
-		QBittorrentURL: "http://qbittorrent:8082",
+		QBittorrentURL: server.URL,
+		JackettURL:     server.URL,
+		ProwlarrURL:    server.URL,
 		SearchProvider: "jackett",
+		httpClient:     server.Client(),
+		execLookPath: func(command string) (string, error) {
+			return command, nil
+		},
 	}
 
 	status := service.Status(context.Background())
@@ -146,14 +203,25 @@ func TestProwlarrDisabledWhenProviderIsJackett(t *testing.T) {
 }
 
 func TestBothJackettAndProwlarrUpWhenProviderIsBoth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
 	service := Service{
 		Mode:           "desktop",
 		ActiveProfiles: []string{"desktop", "worker"},
 		DBPing:         &mockDBPinger{},
-		StoragePath:    "/data/media",
+		StoragePath:    t.TempDir(),
 		FFProbePath:    "ffprobe",
-		QBittorrentURL: "http://qbittorrent:8082",
+		QBittorrentURL: server.URL,
+		JackettURL:     server.URL,
+		ProwlarrURL:    server.URL,
 		SearchProvider: "both",
+		httpClient:     server.Client(),
+		execLookPath: func(command string) (string, error) {
+			return command, nil
+		},
 	}
 
 	status := service.Status(context.Background())
@@ -163,5 +231,27 @@ func TestBothJackettAndProwlarrUpWhenProviderIsBoth(t *testing.T) {
 	}
 	if status.Components["prowlarr"].Status != StatusUp {
 		t.Fatalf("prowlarr status = %v, want UP", status.Components["prowlarr"].Status)
+	}
+}
+
+func TestSystemStatusMarksFFProbeDownWhenExecutableIsMissing(t *testing.T) {
+	service := Service{
+		Mode:           "local",
+		ActiveProfiles: []string{"local"},
+		DBPing:         &mockDBPinger{},
+		StoragePath:    t.TempDir(),
+		FFProbePath:    "missing-ffprobe",
+		QBittorrentURL: "http://127.0.0.1:1",
+		SearchProvider: "jackett",
+		JackettURL:     "http://127.0.0.1:1",
+		execLookPath: func(command string) (string, error) {
+			return "", os.ErrNotExist
+		},
+		ProbeTimeout: 50 * time.Millisecond,
+	}
+
+	status := service.Status(context.Background())
+	if status.Components["ffprobe"].Status != StatusDown {
+		t.Fatalf("ffprobe status = %v, want DOWN", status.Components["ffprobe"].Status)
 	}
 }

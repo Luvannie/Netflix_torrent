@@ -1,7 +1,10 @@
 package catalog
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -136,5 +139,42 @@ func TestTMDBMovieDetailStructure(t *testing.T) {
 	}
 	if movie.Title != "Fight Club" {
 		t.Errorf("Title = %q", movie.Title)
+	}
+}
+
+func TestParsePathIDReturnsTrailingSegment(t *testing.T) {
+	id, err := parsePathID("/api/v1/catalog/123", 1)
+	if err != nil {
+		t.Fatalf("parsePathID returned error: %v", err)
+	}
+	if id != 123 {
+		t.Fatalf("parsePathID returned %d, want 123", id)
+	}
+}
+
+func TestParsePathIDReturnsErrorWhenSegmentMissing(t *testing.T) {
+	if _, err := parsePathID("/api/v1/catalog", 1); err == nil {
+		t.Fatal("parsePathID should fail when the trailing ID segment is missing")
+	}
+}
+
+func TestTMDBClientUsesVersionedBaseURLWithoutDuplicatingVersion(t *testing.T) {
+	var requestPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[],"total_pages":1}`))
+	}))
+	defer server.Close()
+
+	client := NewTMDBClient("", "token", server.URL+"/3", "https://image.tmdb.org/t/p")
+	client.httpClient = server.Client()
+
+	if _, err := client.SearchMovies(context.Background(), "matrix"); err != nil {
+		t.Fatalf("SearchMovies returned error: %v", err)
+	}
+
+	if requestPath != "/3/search/movie" {
+		t.Fatalf("TMDB request path = %q, want %q", requestPath, "/3/search/movie")
 	}
 }
