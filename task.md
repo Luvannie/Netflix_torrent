@@ -20,22 +20,29 @@ Tai lieu tham chieu chinh:
 ## Hien trang
 
 - `Backend/`: da co core API va runtime flow co ban
-- `Desktop/`: da co runtime foundation slice gom config store, instance lock, process manager, diagnostics, bootstrap state, proxy token injection
+- `Desktop/`: da co runtime foundation slice gom config store, instance lock, process manager, diagnostics, bootstrap state, proxy token injection, va startup health coordination
 - `frontend/`: moi o muc shell + typed API contracts, chua co UI flow that
 - Packaging/release: chua co
 
 ## Milestone 1: Desktop Runtime Foundation
 
-- [ ] Dung Wails app that trong `Desktop/`, khong chi la scaffold `main.go/app.go`
-- [ ] Tao startup lifecycle day du: start PostgreSQL, qBittorrent, Prowlarr/Jackett, `backend.exe`
-- [ ] Hoan thien graceful shutdown cho backend va tat ca sidecars
+- [x] Dung Wails app that trong `Desktop/`, khong chi la scaffold `main.go/app.go`
+- [x] Tao startup lifecycle day du: start PostgreSQL, qBittorrent, Prowlarr/Jackett, `backend.exe`
+- [x] Hoan thien graceful shutdown cho backend va tat ca sidecars
 - [x] Tao single-instance lock cho desktop app
-- [ ] Hoan thien `internal/proxy` de proxy REST va stream toi backend
+- [x] Hoan thien `internal/proxy` de proxy REST va stream toi backend
 - [x] Inject `X-App-Local-Token` trong Desktop proxy cho protected write APIs
-- [ ] Hoan thien native bridge: chon folder, mo log, restart sidecar, quit app
+- [x] Hoan thien native bridge: chon folder, mo log, restart sidecar, quit app
 - [x] Hoan thien runtime config loader/saver trong `Desktop/internal/config`
-- [ ] Luu secrets local an toan bang DPAPI hoac co che tuong duong tren Windows
+- [x] Luu secrets local an toan bang DPAPI hoac co che tuong duong tren Windows
 - [x] Hoan thien diagnostics snapshot va startup failure reporting
+
+Ghi chu tien do:
+
+- Da co `startup health coordination`: launcher chi chuyen `READY` sau khi backend health-check thanh cong, va chuyen `FAILED` neu health-check timeout/fail.
+- Da co `os/exec` process runner, graceful shutdown cho child processes, native bridge mac dinh, proxy stream pass-through, va local secret store dung DPAPI tren Windows.
+- `go test ./...` trong `Desktop/` da pass sau khi them Wails runtime wiring.
+- `wails` CLI chua duoc cai trong moi truong local nay, nen build/package bang lenh `wails build` chua duoc verify truc tiep trong session.
 
 ## Milestone 2: First-Run va Runtime Ownership
 

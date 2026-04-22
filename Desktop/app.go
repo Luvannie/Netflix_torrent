@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/netflixtorrent/desktop/internal/bootstrap"
 	"github.com/netflixtorrent/desktop/internal/bridge"
@@ -16,8 +18,11 @@ import (
 
 type Dependencies struct {
 	ConfigStore     config.Store
+	SecretStore     config.SecretStore
 	Paths           config.Paths
 	ProcessRunner   processes.Runner
+	HealthChecker   bootstrap.HealthChecker
+	StartupTimeout  time.Duration
 	Diagnostics     *diagnostics.Collector
 	DirectoryPicker func() (string, error)
 	OpenPath        func(string) error
@@ -25,18 +30,21 @@ type Dependencies struct {
 }
 
 type App struct {
-	mu          sync.RWMutex
-	state       bootstrap.State
-	cfg         config.RuntimeConfig
-	configStore config.Store
-	lock        *bootstrap.InstanceLock
-	bridge      bridge.RuntimeBridge
-	diagnostics *diagnostics.Collector
-	processes   *processes.Manager
-	openPath    func(string) error
-	pickDir     func() (string, error)
-	exit        func(int)
-	proxy       proxy.Config
+	mu             sync.RWMutex
+	state          bootstrap.State
+	cfg            config.RuntimeConfig
+	configStore    config.Store
+	lock           *bootstrap.InstanceLock
+	bridge         bridge.RuntimeBridge
+	diagnostics    *diagnostics.Collector
+	processes      *processes.Manager
+	openPath       func(string) error
+	pickDir        func() (string, error)
+	exit           func(int)
+	proxy          proxy.Config
+	health         bootstrap.HealthChecker
+	startupTimeout time.Duration
+	secrets        config.SecretStore
 }
 
 func NewApp(deps Dependencies) *App {
@@ -50,17 +58,40 @@ func NewApp(deps Dependencies) *App {
 		store = config.NewFileStore(paths.ConfigPath)
 	}
 
+	secretStore := deps.SecretStore
+	if secretStore == nil {
+		defaultSecretStore := config.NewFileSecretStore(paths.SecretsDir, nil)
+		secretStore = defaultSecretStore
+	}
+
 	cfg, err := store.Load()
 	if err != nil {
 		cfg = config.DefaultRuntimeConfig(paths)
 	}
+	cfg.Paths = paths
+	cfg.LocalToken = resolveLocalToken(cfg.LocalToken, secretStore)
 
 	collector := deps.Diagnostics
 	if collector == nil {
 		collector = diagnostics.NewCollector(nil)
 	}
 
+	healthChecker := deps.HealthChecker
+	if healthChecker == nil {
+		healthChecker = bootstrap.HTTPHealthChecker{}
+	}
+
+	startupTimeout := deps.StartupTimeout
+	if startupTimeout <= 0 {
+		startupTimeout = 30 * time.Second
+	}
+
 	manager := processes.NewManager(deps.ProcessRunner)
+	if deps.ProcessRunner == nil {
+		execRunner := processes.NewExecRunner(5 * time.Second)
+		manager = processes.NewManager(execRunner)
+	}
+	nativeBridge := bridge.NewNativeBridge(bridge.ExecCommandRunner{})
 	app := &App{
 		state: bootstrap.State{
 			Step:         bootstrap.StepIdle,
@@ -73,15 +104,32 @@ func NewApp(deps Dependencies) *App {
 		bridge: bridge.RuntimeBridge{
 			AppVersion: "0.1.0",
 		},
-		diagnostics: collector,
-		processes:   manager,
-		openPath:    deps.OpenPath,
-		pickDir:     deps.DirectoryPicker,
-		exit:        deps.Exit,
+		diagnostics:    collector,
+		processes:      manager,
+		health:         healthChecker,
+		startupTimeout: startupTimeout,
+		secrets:        secretStore,
+		openPath:       deps.OpenPath,
+		pickDir:        deps.DirectoryPicker,
+		exit:           deps.Exit,
 		proxy: proxy.Config{
 			TargetBaseURL: cfg.BackendBaseURL,
 			LocalToken:    cfg.LocalToken,
 		},
+	}
+	if app.openPath == nil {
+		app.openPath = nativeBridge.OpenPath
+	}
+	if app.pickDir == nil {
+		app.pickDir = nativeBridge.ChooseDirectory
+	}
+	if app.exit == nil {
+		app.exit = os.Exit
+	}
+	if app.cfg.LocalToken != "" && app.cfg.LocalToken != "replace-me" {
+		if err := app.persistConfig(); err != nil {
+			app.diagnostics.MarkComponent("secrets", "DOWN", fmt.Sprintf("Failed to persist protected local token: %v", err))
+		}
 	}
 	app.diagnostics.MarkOverall("idle", "Desktop runtime initialized")
 	return app
@@ -115,6 +163,11 @@ func (a *App) StartRuntime(ctx context.Context) error {
 
 	a.setState(bootstrap.StepWaitingHealth, "Waiting for backend health checks")
 	a.diagnostics.MarkOverall("starting", "Waiting for backend health checks")
+	if err := a.health.WaitForHealthy(ctx, a.cfg.BackendBaseURL, a.startupTimeout); err != nil {
+		_ = a.processes.StopAll(ctx)
+		a.fail("backend", fmt.Sprintf("Backend health check failed: %v", err))
+		return err
+	}
 
 	a.setState(bootstrap.StepReady, "Desktop runtime is ready")
 	a.diagnostics.MarkOverall("ready", "Desktop runtime is ready")
@@ -171,7 +224,7 @@ func (a *App) SaveLauncherConfig(input config.LauncherSettings) error {
 	if input.MediaRoot != "" {
 		a.cfg.MediaRoot = input.MediaRoot
 	}
-	if err := a.configStore.Save(a.cfg); err != nil {
+	if err := a.persistConfig(); err != nil {
 		return err
 	}
 	return nil
@@ -231,4 +284,25 @@ func (a *App) fail(component, message string) {
 	a.setState(bootstrap.StepFailed, message)
 	a.diagnostics.MarkComponent(component, "DOWN", message)
 	a.diagnostics.MarkOverall("failed", message)
+}
+
+func (a *App) persistConfig() error {
+	saved := a.cfg
+	if a.secrets != nil && saved.LocalToken != "" && saved.LocalToken != "replace-me" {
+		if err := a.secrets.Save("local-token", saved.LocalToken); err != nil {
+			return err
+		}
+		saved.LocalToken = ""
+	}
+	return a.configStore.Save(saved)
+}
+
+func resolveLocalToken(current string, store config.SecretStore) string {
+	if store != nil {
+		loaded, err := store.Load("local-token")
+		if err == nil && loaded != "" {
+			return loaded
+		}
+	}
+	return current
 }

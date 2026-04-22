@@ -7,10 +7,11 @@ import (
 )
 
 type Service struct {
-	Name       string   `json:"name"`
-	Executable string   `json:"executable"`
-	Args       []string `json:"args,omitempty"`
-	WorkingDir string   `json:"workingDir,omitempty"`
+	Name        string            `json:"name"`
+	Executable  string            `json:"executable"`
+	Args        []string          `json:"args,omitempty"`
+	Environment map[string]string `json:"environment,omitempty"`
+	WorkingDir  string            `json:"workingDir,omitempty"`
 }
 
 type ProcessState struct {

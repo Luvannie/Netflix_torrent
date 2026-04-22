@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/netflixtorrent/desktop/internal/bootstrap"
 	"github.com/netflixtorrent/desktop/internal/config"
@@ -16,6 +17,11 @@ type appFakeRunner struct {
 	failFor string
 	started []string
 	stopped []string
+}
+
+type appFakeHealthChecker struct {
+	results []error
+	calls   int
 }
 
 type appFakeHandle struct {
@@ -36,6 +42,17 @@ func (r *appFakeRunner) Start(_ context.Context, service processes.Service) (pro
 	return &appFakeHandle{name: service.Name, stopped: &r.stopped}, nil
 }
 
+func (h *appFakeHealthChecker) WaitForHealthy(context.Context, string, time.Duration) error {
+	h.calls++
+	if len(h.results) == 0 {
+		return nil
+	}
+
+	result := h.results[0]
+	h.results = h.results[1:]
+	return result
+}
+
 func TestAppStartRuntimeTransitionsToReady(t *testing.T) {
 	root := t.TempDir()
 	paths := config.DefaultPaths(root)
@@ -43,11 +60,14 @@ func TestAppStartRuntimeTransitionsToReady(t *testing.T) {
 	cfg.LocalToken = "secret"
 	store := &config.MemoryStore{Config: cfg, Loaded: true}
 	runner := &appFakeRunner{}
+	health := &appFakeHealthChecker{}
 
 	app := NewApp(Dependencies{
-		ConfigStore:   store,
-		Paths:         paths,
-		ProcessRunner: runner,
+		ConfigStore:    store,
+		Paths:          paths,
+		ProcessRunner:  runner,
+		HealthChecker:  health,
+		StartupTimeout: 2 * time.Second,
 	})
 
 	if err := app.StartRuntime(context.Background()); err != nil {
@@ -66,6 +86,9 @@ func TestAppStartRuntimeTransitionsToReady(t *testing.T) {
 	if !reflect.DeepEqual(runner.started, []string{"postgres", "qbittorrent", "provider", "backend"}) {
 		t.Fatalf("started = %#v", runner.started)
 	}
+	if health.calls != 1 {
+		t.Fatalf("health calls = %d", health.calls)
+	}
 
 	diag := app.GetDiagnostics()
 	if diag.Status != "ready" {
@@ -81,10 +104,13 @@ func TestAppStartRuntimeFailsWhenServiceFails(t *testing.T) {
 	paths := config.DefaultPaths(root)
 	store := &config.MemoryStore{Config: config.DefaultRuntimeConfig(paths), Loaded: true}
 	runner := &appFakeRunner{failFor: "backend"}
+	health := &appFakeHealthChecker{}
 	app := NewApp(Dependencies{
-		ConfigStore:   store,
-		Paths:         paths,
-		ProcessRunner: runner,
+		ConfigStore:    store,
+		Paths:          paths,
+		ProcessRunner:  runner,
+		HealthChecker:  health,
+		StartupTimeout: time.Second,
 	})
 
 	err := app.StartRuntime(context.Background())
@@ -99,6 +125,60 @@ func TestAppStartRuntimeFailsWhenServiceFails(t *testing.T) {
 	diag := app.GetDiagnostics()
 	if diag.Status != "failed" {
 		t.Fatalf("diagnostics status = %q", diag.Status)
+	}
+	if health.calls != 0 {
+		t.Fatalf("health calls = %d", health.calls)
+	}
+}
+
+func TestAppStartRuntimeFailsWhenBackendHealthCheckFails(t *testing.T) {
+	root := t.TempDir()
+	paths := config.DefaultPaths(root)
+	store := &config.MemoryStore{Config: config.DefaultRuntimeConfig(paths), Loaded: true}
+	runner := &appFakeRunner{}
+	health := &appFakeHealthChecker{
+		results: []error{errors.New("backend health timeout")},
+	}
+
+	app := NewApp(Dependencies{
+		ConfigStore:    store,
+		Paths:          paths,
+		ProcessRunner:  runner,
+		HealthChecker:  health,
+		StartupTimeout: time.Second,
+	})
+
+	err := app.StartRuntime(context.Background())
+	if err == nil {
+		t.Fatalf("expected StartRuntime() error")
+	}
+
+	state := app.GetBootstrapState()
+	if state.Step != bootstrap.StepFailed {
+		t.Fatalf("state.Step = %q", state.Step)
+	}
+	if health.calls != 1 {
+		t.Fatalf("health calls = %d", health.calls)
+	}
+
+	diag := app.GetDiagnostics()
+	backendStatus, ok := diag.Components["backend"]
+	if !ok {
+		t.Fatalf("expected backend diagnostics component")
+	}
+	if backendStatus.Status != "DOWN" {
+		t.Fatalf("backend diagnostics status = %q", backendStatus.Status)
+	}
+
+	processStates := app.GetProcessStates()
+	wantStates := []processes.ProcessState{
+		{Name: "postgres", Status: "stopped"},
+		{Name: "qbittorrent", Status: "stopped"},
+		{Name: "provider", Status: "stopped"},
+		{Name: "backend", Status: "stopped"},
+	}
+	if !reflect.DeepEqual(processStates, wantStates) {
+		t.Fatalf("process states = %#v, want %#v", processStates, wantStates)
 	}
 }
 

@@ -12,6 +12,7 @@ type Paths struct {
 	ConfigPath   string `json:"configPath"`
 	LogsDir      string `json:"logsDir"`
 	DataDir      string `json:"dataDir"`
+	SecretsDir   string `json:"secretsDir"`
 	LockFilePath string `json:"lockFilePath"`
 }
 
@@ -21,6 +22,7 @@ func DefaultPaths(root string) Paths {
 		ConfigPath:   filepath.Join(root, "launcher.json"),
 		LogsDir:      filepath.Join(root, "logs"),
 		DataDir:      filepath.Join(root, "data"),
+		SecretsDir:   filepath.Join(root, "secrets"),
 		LockFilePath: filepath.Join(root, "run", "netflixtorrent.lock"),
 	}
 }
