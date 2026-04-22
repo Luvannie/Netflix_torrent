@@ -1,0 +1,12 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "NetflixTorrent",
+  "outputfilename": "NetflixTorrent",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "author": {
+    "name": "NetflixTorrent",
+    "email": "dev@localhost"
+  }
+}
