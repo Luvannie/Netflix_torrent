@@ -23,5 +23,15 @@ describe("decideInitialRoute", () => {
       }),
     ).toBe("/app/catalog");
   });
-});
 
+  it("routes to setup when first-run setup is required", () => {
+    expect(
+      decideInitialRoute({
+        step: "SETUP_REQUIRED",
+        message: "First-run setup is required",
+        backendUrl: "http://127.0.0.1:18080",
+        webSocketUrl: "ws://127.0.0.1:18080/ws",
+      }),
+    ).toBe("/setup");
+  });
+});

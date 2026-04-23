@@ -7,23 +7,44 @@ import (
 	"path/filepath"
 )
 
+const CurrentSchemaVersion = 1
+
 type Paths struct {
-	RootDir      string `json:"rootDir"`
-	ConfigPath   string `json:"configPath"`
-	LogsDir      string `json:"logsDir"`
-	DataDir      string `json:"dataDir"`
-	SecretsDir   string `json:"secretsDir"`
-	LockFilePath string `json:"lockFilePath"`
+	RootDir            string `json:"rootDir"`
+	ConfigDir          string `json:"configDir"`
+	ConfigPath         string `json:"configPath"`
+	BackendEnvPath     string `json:"backendEnvPath"`
+	LogsDir            string `json:"logsDir"`
+	DataDir            string `json:"dataDir"`
+	PostgresDataDir    string `json:"postgresDataDir"`
+	QBittorrentDataDir string `json:"qBittorrentDataDir"`
+	ProwlarrDataDir    string `json:"prowlarrDataDir"`
+	JackettDataDir     string `json:"jackettDataDir"`
+	SecretsDir         string `json:"secretsDir"`
+	DefaultMediaDir    string `json:"defaultMediaDir"`
+	RunDir             string `json:"runDir"`
+	LockFilePath       string `json:"lockFilePath"`
 }
 
 func DefaultPaths(root string) Paths {
+	configDir := filepath.Join(root, "config")
+	dataDir := filepath.Join(root, "data")
+	runDir := filepath.Join(root, "run")
 	return Paths{
-		RootDir:      root,
-		ConfigPath:   filepath.Join(root, "launcher.json"),
-		LogsDir:      filepath.Join(root, "logs"),
-		DataDir:      filepath.Join(root, "data"),
-		SecretsDir:   filepath.Join(root, "secrets"),
-		LockFilePath: filepath.Join(root, "run", "netflixtorrent.lock"),
+		RootDir:            root,
+		ConfigDir:          configDir,
+		ConfigPath:         filepath.Join(configDir, "launcher.json"),
+		BackendEnvPath:     filepath.Join(configDir, "backend.runtime.env"),
+		LogsDir:            filepath.Join(root, "logs"),
+		DataDir:            dataDir,
+		PostgresDataDir:    filepath.Join(dataDir, "postgres"),
+		QBittorrentDataDir: filepath.Join(dataDir, "qbittorrent"),
+		ProwlarrDataDir:    filepath.Join(dataDir, "prowlarr"),
+		JackettDataDir:     filepath.Join(dataDir, "jackett"),
+		SecretsDir:         filepath.Join(root, "secrets"),
+		DefaultMediaDir:    filepath.Join(root, "media", "Movies"),
+		RunDir:             runDir,
+		LockFilePath:       filepath.Join(runDir, "netflixtorrent.lock"),
 	}
 }
 
@@ -34,13 +55,28 @@ type Executables struct {
 	Provider    string `json:"provider"`
 }
 
+type Ports struct {
+	Backend     int `json:"backend"`
+	Postgres    int `json:"postgres"`
+	QBittorrent int `json:"qBittorrent"`
+	Prowlarr    int `json:"prowlarr"`
+	Jackett     int `json:"jackett"`
+}
+
 type RuntimeConfig struct {
-	BackendBaseURL string      `json:"backendBaseUrl"`
-	WebSocketURL   string      `json:"webSocketUrl"`
-	LocalToken     string      `json:"localToken"`
-	MediaRoot      string      `json:"mediaRoot"`
-	Paths          Paths       `json:"paths"`
-	Executables    Executables `json:"executables"`
+	ConfigSchemaVersion     int         `json:"configSchemaVersion"`
+	SetupComplete           bool        `json:"setupComplete"`
+	BackendBaseURL          string      `json:"backendBaseUrl"`
+	WebSocketURL            string      `json:"webSocketUrl"`
+	LocalToken              string      `json:"-"`
+	DatabasePassword        string      `json:"-"`
+	QBittorrentPassword     string      `json:"-"`
+	MediaRoot               string      `json:"mediaRoot"`
+	DownloadDefaultSavePath string      `json:"downloadDefaultSavePath"`
+	SearchProvider          string      `json:"searchProvider"`
+	Ports                   Ports       `json:"ports"`
+	Paths                   Paths       `json:"paths"`
+	Executables             Executables `json:"executables"`
 }
 
 type LauncherSettings struct {
@@ -49,11 +85,21 @@ type LauncherSettings struct {
 
 func DefaultRuntimeConfig(paths Paths) RuntimeConfig {
 	return RuntimeConfig{
-		BackendBaseURL: "http://127.0.0.1:18080",
-		WebSocketURL:   "ws://127.0.0.1:18080/ws",
-		LocalToken:     "replace-me",
-		MediaRoot:      "",
-		Paths:          paths,
+		ConfigSchemaVersion:     CurrentSchemaVersion,
+		SetupComplete:           false,
+		BackendBaseURL:          "http://127.0.0.1:18080",
+		WebSocketURL:            "ws://127.0.0.1:18080/ws",
+		MediaRoot:               "",
+		DownloadDefaultSavePath: paths.DefaultMediaDir,
+		SearchProvider:          "prowlarr",
+		Ports: Ports{
+			Backend:     18080,
+			Postgres:    15432,
+			QBittorrent: 18082,
+			Prowlarr:    19696,
+			Jackett:     19117,
+		},
+		Paths: paths,
 		Executables: Executables{
 			Backend:     filepath.Join(paths.RootDir, "bin", "backend.exe"),
 			Postgres:    filepath.Join(paths.RootDir, "bin", "postgres.exe"),
@@ -61,6 +107,10 @@ func DefaultRuntimeConfig(paths Paths) RuntimeConfig {
 			Provider:    filepath.Join(paths.RootDir, "bin", "prowlarr.exe"),
 		},
 	}
+}
+
+func MarshalRuntimeConfig(cfg RuntimeConfig) ([]byte, error) {
+	return json.MarshalIndent(cfg, "", "  ")
 }
 
 type Store interface {
@@ -98,7 +148,7 @@ func (s FileStore) Save(cfg RuntimeConfig) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := MarshalRuntimeConfig(cfg)
 	if err != nil {
 		return err
 	}

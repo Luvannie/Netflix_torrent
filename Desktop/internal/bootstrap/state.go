@@ -7,6 +7,7 @@ const (
 	StepAcquiringLock    Step = "ACQUIRING_LOCK"
 	StepStartingServices Step = "STARTING_SERVICES"
 	StepWaitingHealth    Step = "WAITING_HEALTH"
+	StepSetupRequired    Step = "SETUP_REQUIRED"
 	StepReady            Step = "READY"
 	StepFailed           Step = "FAILED"
 )

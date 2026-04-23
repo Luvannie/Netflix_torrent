@@ -1,5 +1,12 @@
 export type NativeBootstrapState = {
-  step: "IDLE" | "STARTING_BACKEND" | "WAITING_HEALTH" | "READY" | "FAILED";
+  step:
+    | "IDLE"
+    | "ACQUIRING_LOCK"
+    | "STARTING_SERVICES"
+    | "WAITING_HEALTH"
+    | "SETUP_REQUIRED"
+    | "READY"
+    | "FAILED";
   message: string;
   backendUrl: string;
   webSocketUrl: string;
@@ -29,4 +36,3 @@ export function getRuntimeBindings(): RuntimeBindings {
   }
   return window.desktopApp;
 }
-

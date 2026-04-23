@@ -46,15 +46,15 @@ Ghi chu tien do:
 
 ## Milestone 2: First-Run va Runtime Ownership
 
-- [ ] Tao directory layout trong `%LOCALAPPDATA%\\NetflixTorrent`
-- [ ] Sinh local token, DB password, qBittorrent password o first run
-- [ ] Bootstrap Postgres data directory va database `netflixtorrent`
-- [ ] Bootstrap qBittorrent config va WebUI localhost bind
-- [ ] Bootstrap Prowlarr hoac Jackett config
-- [ ] Dong bo `DOWNLOAD_DEFAULT_SAVE_PATH` giua backend va qBittorrent
-- [ ] Tao config schema versioning cho launcher config
-- [ ] Hoan thien recovery flow neu sidecar hoac backend khoi dong that bai
-- [ ] Hoan thien setup-complete flag va startup gate giua `StartupShell` / `SetupShell` / `AppShell`
+- [x] Tao directory layout trong `%LOCALAPPDATA%\\NetflixTorrent`
+- [x] Sinh local token, DB password, qBittorrent password o first run
+- [x] Bootstrap Postgres data directory va database `netflixtorrent`
+- [x] Bootstrap qBittorrent config va WebUI localhost bind
+- [x] Bootstrap Prowlarr hoac Jackett config
+- [x] Dong bo `DOWNLOAD_DEFAULT_SAVE_PATH` giua backend va qBittorrent
+- [x] Tao config schema versioning cho launcher config
+- [x] Hoan thien recovery flow neu sidecar hoac backend khoi dong that bai
+- [x] Hoan thien setup-complete flag va startup gate giua `StartupShell` / `SetupShell` / `AppShell`
 
 ## Milestone 3: Frontend App Shell va Navigation
 

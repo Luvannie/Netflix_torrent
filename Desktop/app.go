@@ -51,6 +51,8 @@ func NewApp(deps Dependencies) *App {
 	paths := deps.Paths
 	if paths.RootDir == "" {
 		paths = config.DefaultPaths(".netflixtorrent")
+	} else if paths.ConfigPath == "" {
+		paths = config.DefaultPaths(paths.RootDir)
 	}
 
 	store := deps.ConfigStore
@@ -69,7 +71,30 @@ func NewApp(deps Dependencies) *App {
 		cfg = config.DefaultRuntimeConfig(paths)
 	}
 	cfg.Paths = paths
-	cfg.LocalToken = resolveLocalToken(cfg.LocalToken, secretStore)
+	if cfg, err = bootstrap.PrepareFirstRun(cfg, secretStore, nil); err != nil {
+		cfg = config.DefaultRuntimeConfig(paths)
+		collector := diagnostics.NewCollector(nil)
+		collector.MarkComponent("first-run", "DOWN", fmt.Sprintf("Failed to prepare first run: %v", err))
+		collector.MarkOverall("failed", fmt.Sprintf("Failed to prepare first run: %v", err))
+		return &App{
+			state: bootstrap.State{
+				Step:         bootstrap.StepFailed,
+				Message:      fmt.Sprintf("Failed to prepare first run: %v", err),
+				BackendURL:   cfg.BackendBaseURL,
+				WebSocketURL: cfg.WebSocketURL,
+			},
+			cfg:            cfg,
+			configStore:    store,
+			diagnostics:    collector,
+			processes:      processes.NewManager(deps.ProcessRunner),
+			health:         deps.HealthChecker,
+			startupTimeout: deps.StartupTimeout,
+			secrets:        secretStore,
+			openPath:       deps.OpenPath,
+			pickDir:        deps.DirectoryPicker,
+			exit:           deps.Exit,
+		}
+	}
 
 	collector := deps.Diagnostics
 	if collector == nil {
@@ -136,6 +161,12 @@ func NewApp(deps Dependencies) *App {
 }
 
 func (a *App) StartRuntime(ctx context.Context) error {
+	if !a.setupComplete() {
+		a.setState(bootstrap.StepSetupRequired, "First-run setup is required")
+		a.diagnostics.MarkOverall("setup_required", "First-run setup is required")
+		return nil
+	}
+
 	a.setState(bootstrap.StepAcquiringLock, "Acquiring desktop instance lock")
 
 	lock, err := bootstrap.AcquireInstanceLock(a.cfg.Paths.LockFilePath)
@@ -146,14 +177,13 @@ func (a *App) StartRuntime(ctx context.Context) error {
 	a.lock = lock
 
 	a.setState(bootstrap.StepStartingServices, "Starting local services")
-	services := []processes.Service{
-		{Name: "postgres", Executable: a.cfg.Executables.Postgres},
-		{Name: "qbittorrent", Executable: a.cfg.Executables.QBittorrent},
-		{Name: "provider", Executable: a.cfg.Executables.Provider},
-		{Name: "backend", Executable: a.cfg.Executables.Backend},
+	services, err := bootstrap.PrepareSidecarServices(a.cfg)
+	if err != nil {
+		a.fail("bootstrap", fmt.Sprintf("Failed to prepare sidecar configs: %v", err))
+		return err
 	}
 	if err := a.processes.StartAll(ctx, services); err != nil {
-		a.fail("startup", fmt.Sprintf("Failed to start services: %v", err))
+		a.fail(a.failedServiceName(), fmt.Sprintf("Failed to start services: %v", err))
 		return err
 	}
 
@@ -223,6 +253,8 @@ func (a *App) SaveLauncherConfig(input config.LauncherSettings) error {
 
 	if input.MediaRoot != "" {
 		a.cfg.MediaRoot = input.MediaRoot
+		a.cfg.DownloadDefaultSavePath = input.MediaRoot
+		a.cfg.SetupComplete = true
 	}
 	if err := a.persistConfig(); err != nil {
 		return err
@@ -287,22 +319,36 @@ func (a *App) fail(component, message string) {
 }
 
 func (a *App) persistConfig() error {
-	saved := a.cfg
-	if a.secrets != nil && saved.LocalToken != "" && saved.LocalToken != "replace-me" {
-		if err := a.secrets.Save("local-token", saved.LocalToken); err != nil {
-			return err
+	if a.secrets != nil {
+		for name, value := range map[string]string{
+			"local-token":          a.cfg.LocalToken,
+			"database-password":    a.cfg.DatabasePassword,
+			"qbittorrent-password": a.cfg.QBittorrentPassword,
+		} {
+			if value == "" || value == "replace-me" {
+				continue
+			}
+			if err := a.secrets.Save(name, value); err != nil {
+				return err
+			}
 		}
-		saved.LocalToken = ""
 	}
-	return a.configStore.Save(saved)
+	return a.configStore.Save(bootstrap.SanitizeForSave(a.cfg))
 }
 
-func resolveLocalToken(current string, store config.SecretStore) string {
-	if store != nil {
-		loaded, err := store.Load("local-token")
-		if err == nil && loaded != "" {
-			return loaded
+func (a *App) setupComplete() bool {
+	return a.cfg.SetupComplete && a.cfg.MediaRoot != "" && a.cfg.DownloadDefaultSavePath != ""
+}
+
+func (a *App) backendEnvironment() map[string]string {
+	return bootstrap.BackendEnvironment(a.cfg)
+}
+
+func (a *App) failedServiceName() string {
+	for _, service := range a.processes.Snapshot() {
+		if service.Status == "failed" {
+			return service.Name
 		}
 	}
-	return current
+	return "startup"
 }
